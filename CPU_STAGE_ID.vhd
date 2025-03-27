@@ -5,10 +5,12 @@ use IEEE.NUMERIC_STD.ALL;
 library WORK;
 
 entity CPU_STAGE_ID is
+
     generic (
         GENERATE_REGISTERS : boolean := TRUE;
-        QUARTUS_MEMORY     : boolean := FALSE
+		QUARTUS_MEMORY     : boolean := FALSE
     );
+
     port (
         clock                 : in  std_logic;
         clear                 : in  std_logic;
@@ -22,6 +24,7 @@ entity CPU_STAGE_ID is
         control_if            : out WORK.CPU.t_CONTROL_IF;
         signals_ex            : out WORK.CPU.t_SIGNALS_ID_EX
     );
+
 end entity;
 
 architecture RV32I of CPU_STAGE_ID is
@@ -32,18 +35,11 @@ architecture RV32I of CPU_STAGE_ID is
     signal forward_source_1    : WORK.CPU.t_DATA;
     signal data_source_2       : WORK.CPU.t_DATA;
     signal data_immediate      : WORK.CPU.t_DATA;
-    signal address_out         : WORK.CPU.t_DATA;
+	signal address_out         : WORK.CPU.t_DATA;
     signal enable_flush        : std_logic;
     signal enable_branch       : std_logic;
 
-    -- ?? FIXED: Declare select_source_1 and select_source_2
-    signal select_source_1     : WORK.RV32I.t_REGISTER;
-    signal select_source_2     : WORK.RV32I.t_REGISTER;
-
-    -- ?? FIXED: Extracted instruction signal
-    signal instruction         : WORK.RV32I.t_INSTRUCTION;
-
-    -- Optional: If you want to use enable_multiplier later
+    -- Added for multiplication support
     signal enable_multiplier   : std_logic;
 
 begin
@@ -75,22 +71,19 @@ begin
     signals_ex.data_source_2   <= data_source_2;
     signals_ex.data_immediate  <= data_immediate;
 
-    -- ?? FIXED: Extract instruction once
-    instruction <= WORK.RV32I.to_INSTRUCTION(source_0.data_instruction);
+    process(source_0.data_instruction) is
+        variable instruction : WORK.RV32I.t_INSTRUCTION;
+    begin
+        instruction := WORK.RV32I.to_INSTRUCTION(source_0.data_instruction);
 
-    -- Assign control and opcode fields
-    signals_ex.funct_7            <= instruction.funct_7;
-    signals_ex.funct_3            <= instruction.funct_3;
-    signals_ex.opcode             <= instruction.opcode;
-    signals_ex.select_destination <= instruction.select_destination;
-    signals_ex.select_source_1    <= instruction.select_source_1;
-    signals_ex.select_source_2    <= instruction.select_source_2;
+        signals_ex.funct_7            <= instruction.funct_7;
+        signals_ex.funct_3            <= instruction.funct_3;
+        signals_ex.opcode             <= instruction.opcode;
+        signals_ex.select_destination <= instruction.select_destination;
+        signals_ex.select_source_1    <= instruction.select_source_1;
+        signals_ex.select_source_2    <= instruction.select_source_2;
+    end process;
 
-    -- Extracted register selection for register file
-    select_source_1 <= instruction.select_source_1;
-    select_source_2 <= instruction.select_source_2;
-
-    -- ?? FIXED: Connected enable_multiplier
     MODULE_CONTROL_UNIT : entity WORK.MODULE_CONTROL_UNIT(RV32I)
         port map (
             clear              => '0',
@@ -100,34 +93,36 @@ begin
             control_ex         => signals_ex.control_ex,
             control_mem        => signals_ex.control_mem,
             control_wb         => signals_ex.control_wb,
-            enable_multiplier  => enable_multiplier
-        );
+            enable_multiplier  => enable_multiplier    -- Added
+    );
+
+    -- Propagate enable_multiplier into EX stage via signals_ex
+    signals_ex.enable_multiplier <= enable_multiplier;
 
     MODULE_REGISTER_FILE : entity WORK.MODULE_REGISTER_FILE(RV32I)
         port map (
-            clk                => clock,
-            reset              => '0',
-            reg_write          => enable_destination,
-            write_reg          => select_destination,
-            write_data         => data_destination,
-            read_reg1          => select_source_1,
-            read_reg2          => select_source_2,
-            read_data1         => data_source_1,
-            read_data2         => data_source_2
-        );
-    
+        clock              => clock,
+        clear              => '0',
+        enable             => enable_destination,
+        select_destination => select_destination,
+        data_destination   => data_destination,
+        select_source_1    => WORK.RV32I.to_INSTRUCTION(source_0.data_instruction).select_source_1,
+        select_source_2    => WORK.RV32I.to_INSTRUCTION(source_0.data_instruction).select_source_2,
+        data_source_1      => data_source_1,
+        data_source_2      => data_source_2
+    );
 
-    QUARTUS_DELAY : if (QUARTUS_MEMORY = TRUE) generate
+	QUARTUS_DELAY : if (QUARTUS_MEMORY = TRUE) generate
         UPDATE : process(clock)
         begin
             if (rising_edge(clock)) then
                 if (enable = '1') then
-                    address_out <= source_0.address_program;
+						address_out <= source_0.address_program;
                 end if;
             end if;
         end process;
     else generate
-        address_out <= source_0.address_program;
+         address_out <= source_0.address_program;
     end generate;
 
     BRANCH_UNIT: entity WORK.MODULE_BRANCH_UNIT(RV32I)
@@ -142,7 +137,7 @@ begin
     BRANCH_COMPARE_UNIT: entity WORK.MODULE_BRANCH_COMPARE_UNIT(RV32I)
         port map (
             enable             => control_id.enable_branch,
-            select_function    => "0" & instruction.funct_3,
+            select_function    => "0" & WORK.RV32I.to_INSTRUCTION(source_0.data_instruction).funct_3,
             source_1           => data_source_1,
             source_2           => data_source_2,
             forward            => forward,
@@ -151,4 +146,3 @@ begin
         );
 
 end architecture;
-
