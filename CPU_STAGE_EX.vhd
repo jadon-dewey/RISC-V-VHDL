@@ -25,6 +25,10 @@ architecture RV32I of CPU_STAGE_EX is
     signal data_source_1   : WORK.CPU.t_DATA;
     signal data_source_2   : WORK.CPU.t_DATA;
 
+
+
+    -- [ADDED] Output of the multiplier
+    signal data_multiplication : WORK.CPU.t_DATA;
 begin
     -- Handling the clear and enable signals properly
     PIPELINE : if GENERATE_REGISTERS = TRUE generate
@@ -50,6 +54,9 @@ begin
     destination.data_source_2      <= data_source_2;
     destination.select_destination <= source_0.select_destination;
     destination.funct_3            <= source_0.funct_3;
+
+    -- [ADDED] Connect multiplier result into EX/MEM stage
+    destination.data_multiplication <= data_multiplication;
 
     -- Multiplexer for forwarding logic
     MUX_FORWARD_SOURCE_1 : entity WORK.GENERIC_MUX_4X1
@@ -89,8 +96,6 @@ begin
 
     MODULE_EXECUTION_UNIT : entity WORK.MODULE_EXECUTION_UNIT(RV32I)
         port map (
-            clock           => clock,
-            enable          => enable,
             select_source_1 => source_0.control_ex.select_source_1,
             select_source_2 => source_0.control_ex.select_source_2,
             select_function => select_function,
@@ -101,5 +106,17 @@ begin
             destination     => destination.data_destination,
             overflow        => open  -- Connect to a signal if overflow needs to be monitored
         );
+
+    -- [ADDED] Multiplier unit
+    RV32M_MULTIPLIER : entity WORK.RV32M_MULTIPLIER
+    port map (
+        clock      => clock,
+        enable     => source_0.enable_multiplier,
+        select_fun => "00",  -- regular MUL
+        input_A    => data_source_1,
+        input_B    => data_source_2,
+        result_LO  => data_multiplication,
+        result_HI  => open
+    );
 
 end architecture;
