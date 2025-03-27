@@ -79,7 +79,6 @@ package CPU is
         select_source_1  : std_logic_vector(1 downto 0);
         --! Seleciona a fonte da entrada `source_2`
         select_source_2  : std_logic_vector(1 downto 0);
-        select_function  : std_logic_vector(4 downto 0);
     end record;
 
     --! Pontos de controle do estágio Acessa a Memória (Memory Access)
@@ -134,6 +133,8 @@ package CPU is
         select_source_1    : t_REGISTER;
         --! Vetor do seletor do `source_2`
         select_source_2    : t_REGISTER;
+
+        enable_multiplier  : std_logic;
     end record;
 
     --! Sinais passados do estágio Executa para o estágio Acessa a Memória, contendo os dados e pontos de controle registrados no pipeline
@@ -150,6 +151,8 @@ package CPU is
         select_destination : t_REGISTER;
         --! Vetor do `funct_3`
         funct_3            : WORK.RV32I.t_FUNCT3;
+
+        data_multiplication : t_DATA;
     end record;
 
     --! Sinais passados do estágio Acessa a Memória para o estágio Escrita de Retorno, contendo os dados e pontos de controle registrados no pipeline
@@ -160,10 +163,9 @@ package CPU is
         data_memory        : t_DATA;
         --! Vetor `destination` do Executa
         data_destination   : t_DATA;
-
-        data_multiplication : t_DATA;
         --! Vetor do seletor do `destination`
         select_destination : t_REGISTER;
+
     end record;
 
     --! Dados e pontos de controle de forwarding do comparador de desvio no estágio Decodifica Instrução
@@ -205,8 +207,7 @@ package CPU is
     --! Registro nulo de `NULL_CONTROL_EX`
     constant NULL_CONTROL_EX : t_CONTROL_EX := (
         select_source_1  => (others => '0'),
-        select_source_2  => (others => '0'),
-        select_function  => (others => '0')
+        select_source_2  => (others => '0')
     );
 
     --! Registro nulo de `NULL_CONTROL_MEM`
@@ -241,7 +242,8 @@ package CPU is
         opcode             => WORK.RV32I.OPCODE_OP_IMM,
         select_source_1    => (others => '0'),
         select_source_2    => (others => '0'),
-        select_destination => (others => '0')
+        select_destination => (others => '0'),
+        enable_multiplier  => '0'
     );
 
     --! Registro nulo de `NULL_SIGNALS_EX_MEM`
@@ -251,7 +253,8 @@ package CPU is
         data_destination   => (others => '0'),
         data_source_2      => (others => '0'),
         select_destination => (others => '0'),
-        funct_3            => WORK.RV32I.FUNCT3_ADDI
+        funct_3            => WORK.RV32I.FUNCT3_ADDI,
+        data_multiplication => (others => '0')
     );
 
     --! Registro nulo de `NULL_SIGNALS_MEM_WB`
@@ -259,8 +262,7 @@ package CPU is
         control_wb         => NULL_CONTROL_WB,
         data_memory        => (others => '0'),
         data_destination   => (others => '0'),
-        select_destination => (others => '0'),
-        data_multiplication => (others => '0')
+        select_destination => (others => '0')
     );
 
     --! Registro nulo de `NULL_FORWARD_BRANCH`
