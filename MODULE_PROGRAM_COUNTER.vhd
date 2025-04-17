@@ -12,46 +12,64 @@ entity MODULE_PROGRAM_COUNTER is
         clock         : in  std_logic;
         clear         : in  std_logic;
         enable        : in  std_logic;
-        selector      : in  std_logic;  -- '0': normal PC+4, '1': branch target (source)
+        selector      : in  std_logic;  -- '0': normal PC+4, '1': branch/jump target
         source        : in  std_logic_vector(DATA_WIDTH-1 downto 0);
         destination   : out std_logic_vector(DATA_WIDTH-1 downto 0);
-        -- New ports for interrupt handling:
-        interrupt_req : in  std_logic;
-        interrupt_addr: in  std_logic_vector(DATA_WIDTH-1 downto 0);
-        mret          : in  std_logic
+
+        -- Interrupt-related ports
+        interrupt_req  : in  std_logic;
+        interrupt_addr : in  std_logic_vector(DATA_WIDTH-1 downto 0);
+
+        -- No external mret anymore; replaced by internal logic
+        mret           : in  std_logic := '0' -- Optional / unused now
     );
 end entity;
 
 architecture RV32I of MODULE_PROGRAM_COUNTER is
 
-    signal count_current   : WORK.RV32I.t_DATA;  -- Current PC value
-    signal count_increment : WORK.RV32I.t_DATA;  -- PC + 4
-    signal normal_pc       : WORK.RV32I.t_DATA;  -- Normal next PC (without interrupt override)
-    signal final_pc_input  : WORK.RV32I.t_DATA;  -- Final next PC value
-    signal mepc            : WORK.RV32I.t_DATA := (others => '0'); -- Minimal context saving
-    -- signal effective_enable_bool : boolean; -- Boolean variable for compute the signal value
-    -- signal effective_enable : std_logic; -- Effective enable signal to stall the PC when an interrupt is asserted
+    -- Internal PC state
+    signal count_current    : std_logic_vector(DATA_WIDTH-1 downto 0);
+    signal count_increment  : std_logic_vector(DATA_WIDTH-1 downto 0);
+    signal normal_pc        : std_logic_vector(DATA_WIDTH-1 downto 0);
+    signal final_pc_input   : std_logic_vector(DATA_WIDTH-1 downto 0);
+
+    -- Context saving
+    signal mepc             : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
+
+    -- Internal FSM flags
+    signal interrupt_active : std_logic := '0'; -- Indicates ISR is being handled
+    signal mret_internal    : std_logic := '0'; -- Asserts one cycle when returning from interrupt
 
 begin
+    
+    -- PC + 4 calculation
+    COUNT_ADDER : entity WORK.GENERIC_ADDER
+        generic map (
+            DATA_WIDTH       => DATA_WIDTH,
+            DEFAULT_SOURCE_2 => 4
+        )
+        port map (
+            source_1    => count_current,
+            destination => count_increment
+        );
 
-    -- Drive the output with the current PC
+    -- Drive output port
     destination <= count_current;
     
-    -- Calculate the normal PC value:
+    -- Normal PC: either PC+4 or jump/branch target
     normal_pc <= count_increment when selector = '0' else source;
 
-    -- Final selection: if mret, restore PC from mepc; if interrupt, use interrupt_addr; otherwise, use normal_pc.
-    final_pc_input <= mepc           when mret = '1' else
+    -- Final PC input: prioritized mux structure
+    final_pc_input <= mepc           when mret_internal = '1' else
                       interrupt_addr when interrupt_req = '1' else
                       normal_pc;
 
-    -- Compute the effective enable signal: enable signal must be asserted; if interrupt_req is asserted, then don't increment the PC
-    -- effective_enable_bool <= (enable = '1') and not (count_current = interrupt_addr);
-    -- effective_enable <= '1' when effective_enable_bool else '0';
-
-    -- Update the PC register:
+    
+    -- PC register (updates with selected input)
     COUNT_REGISTER : entity WORK.GENERIC_REGISTER
-        generic map ( DATA_WIDTH => WORK.RV32I.XLEN )
+        generic map (
+            DATA_WIDTH => DATA_WIDTH
+        )
         port map (
             clock       => clock,
             clear       => clear,
@@ -60,26 +78,28 @@ begin
             destination => count_current
         );
 
-    
-    -- Adder to increment the PC by 4:
-    COUNT_ADDER : entity WORK.GENERIC_ADDER
-        generic map (
-            DATA_WIDTH       => WORK.RV32I.XLEN,
-            DEFAULT_SOURCE_2 => 4
-        )
-        port map (
-            source_1    => count_current,
-            destination => count_increment
-        );
-
-    -- Context saving process: save the current PC when an interrupt is asserted.
+    -- Context-saving + internal mret signal logic
     process(clock)
     begin
         if rising_edge(clock) then
-            if clear = '1' then
-                mepc <= (others => '0');
-            elsif interrupt_req = '1' and not (count_current = interrupt_addr) then
-                mepc <= count_current;
+            if clear = '1' then -- Clear logic
+                mepc             <= (others => '0');
+                interrupt_active <= '0';
+                mret_internal    <= '0';
+
+            -- Save PC when interrupt is first detected (edge detector on interrupt request signal)
+            elsif interrupt_req = '1' and interrupt_active = '0' then
+                mepc             <= count_current;
+                interrupt_active <= '1';
+                mret_internal    <= '0';
+
+            -- Return from interrupt: trigger PC restore on deassertion
+            elsif interrupt_req = '0' and interrupt_active = '1' then
+                interrupt_active <= '0';
+                mret_internal    <= '1'; -- Will select mepc for 1 cycle
+
+            else
+                mret_internal <= '0'; -- Reset after one cycle
             end if;
         end if;
     end process;

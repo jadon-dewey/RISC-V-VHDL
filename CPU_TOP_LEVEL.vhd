@@ -49,7 +49,9 @@ architecture RV32I of CPU_TOP_LEVEL is
     signal flag_stall                  : std_logic;
     signal flag_hazzard                : std_logic;
     signal flush_pipeline              : std_logic;
-    signal acknowledge_internal        : std_logic;
+    signal acknowledge_internal        : std_logic; -- Track the acknowledge signal to output to the interrupt unit
+    signal old_interrupt_req           : std_logic;
+    signal intr_pending                : std_logic;
 
 begin
 
@@ -86,7 +88,7 @@ begin
         )
         port map (
             clock                => clock,
-            clear                => NOT flag_stall,
+            clear                => NOT flag_stall or flush_pipeline,
             enable               => NOT (flag_hazzard OR (flag_stall AND control_if.enable_stall)),
             enable_destination   => stage_wb_enable_destination,
             select_destination   => stage_wb_select_destination,
@@ -101,7 +103,7 @@ begin
     EXECUTE : entity WORK.CPU_STAGE_EX(RV32I)
         port map (
             clock           => clock,
-            clear           => clear OR (flag_hazzard OR (flag_stall AND control_if.enable_stall)),
+            clear           => clear or flush_pipeline OR (flag_hazzard OR (flag_stall AND control_if.enable_stall)),
             enable          => enable,
             forward         => stage_ex_forward_execution,
             source          => signals_id_ex,
@@ -113,7 +115,7 @@ begin
     MEMORY_ACCESS : entity WORK.CPU_STAGE_MEM(RV32I)
         port map (
             clock           => clock,
-            clear           => clear,
+            clear           => clear or flush_pipeline,
             enable          => enable,
             source          => signals_ex_mem,
             data_memory_in  => data_memory_in,
@@ -126,7 +128,7 @@ begin
     WRITE_BACK : entity WORK.CPU_STAGE_WB(RV32I)
         port map (
             clock              => clock,
-            clear              => clear,
+            clear              => clear or flush_pipeline,
             enable             => enable,
             enable_destination => stage_wb_enable_destination,
             select_destination => stage_wb_select_destination,
@@ -158,6 +160,7 @@ begin
 
     CONTROL_HAZZARD_UNIT : entity WORK.CPU_HAZZARD_CONTROL_UNIT
         port map (
+            clock              => clock, -- Clock for edge detection of interrupt request
             stage_id_select_source_1     => signals_id_ex.select_source_1,
             stage_id_select_source_2     => signals_id_ex.select_source_2,
             stage_ex_enable_read         => signals_ex_mem.control_mem.enable_read,
@@ -171,24 +174,50 @@ begin
             flush_pipeline               => flush_pipeline    -- New mapping for pipeline flush
         );
 
-    -- --------------------------------------------------------------------------
-    -- Acknowledge Process:
-    -- This process asserts the 'acknowledge' signal when an interrupt is being
-    -- serviced. In this example, we assume that when an interrupt is active
-    -- and the program counter equals the interrupt vector, the CPU sends an
-    -- acknowledge for one clock cycle.
-    -- --------------------------------------------------------------------------
-    process(clock)
+    ------------------------------------------------------------------------------
+    -- Interrupt Edge + Acknowledge Logic
+    ------------------------------------------------------------------------------
+    -- We'll use two processes: one to remember the old interrupt_req
+    -- and another to handle the "interrupt pending" latch & single-cycle acknowledge.
+    ------------------------------------------------------------------------------
+    
+    -- Track old_interrupt_req to detect a rising edge
+    process(clock, clear)
     begin
-        if rising_edge(clock) then
-            -- Check if an interrupt is requested and the PC has jumped to the interrupt vector
-            if (interrupt_req = '1') and (address_program = interrupt_addr) then
+        if clear = '1' then
+            old_interrupt_req <= '0';
+        elsif rising_edge(clock) then
+            old_interrupt_req <= interrupt_req;
+        end if;
+    end process;
+
+    -- Latch an interrupt as 'pending' on rising edge, then pulse acknowledge
+    -- after the pipeline actually jumps to interrupt_addr
+    process(clock, clear)
+    begin
+        if clear = '1' then
+            intr_pending         <= '0';
+            acknowledge_internal <= '0';
+
+        elsif rising_edge(clock) then
+            -- Default the acknowledge pulse to '0' every cycle
+            acknowledge_internal <= '0';
+
+            -- (1) If we see a rising edge of interrupt_req, set intr_pending=1
+            if (intr_pending = '0') and (old_interrupt_req = '0') and (interrupt_req = '1') then
+                intr_pending <= '1';
+            end if;
+
+            -- (2) Once the CPU's address_program actually matches interrupt_addr,
+            --     pulse the acknowledge for one cycle and clear intr_pending
+            if (intr_pending = '1') and (address_program = interrupt_addr) then
                 acknowledge_internal <= '1';
-            else
-                acknowledge_internal <= '0';
+                intr_pending         <= '0';
             end if;
         end if;
     end process;
 
-    acknowledge <= acknowledge_internal; -- Update the output acknowledge signal with the internal signal within the architecture of the CPU_TOP_LEVEL
+    -- Finally, drive the entity output from our internal registered signal
+    acknowledge <= acknowledge_internal;
+
 end architecture;
