@@ -1,43 +1,46 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.NUMERIC_STD.ALL;
+
+library WORK;
 
 entity MODULE_REGISTER_FILE is
-    Port (
-        clk         : in  std_logic;
-        reset       : in  std_logic;
-        reg_write   : in  std_logic;
-        read_reg1   : in  std_logic_vector(4 downto 0);
-        read_reg2   : in  std_logic_vector(4 downto 0);
-        write_reg   : in  std_logic_vector(4 downto 0);
-        write_data  : in  std_logic_vector(31 downto 0);
-        read_data1  : out std_logic_vector(31 downto 0);
-        read_data2  : out std_logic_vector(31 downto 0)
+
+    generic (
+        DATA_WIDTH    : natural := WORK.RV32I.XLEN;
+        ADDRESS_WIDTH : natural := WORK.RV32I.REGISTER_WIDTH
     );
-end MODULE_REGISTER_FILE;   
 
-architecture RTL of MODULE_REGISTER_FILE is
+    port (
+        clock              : in  std_logic;
+        clear              : in  std_logic;
+        enable             : in  std_logic;
+        select_destination : in  std_logic_vector((ADDRESS_WIDTH - 1) downto 0);
+        select_source_1    : in  std_logic_vector((ADDRESS_WIDTH - 1) downto 0);
+        select_source_2    : in  std_logic_vector((ADDRESS_WIDTH - 1) downto 0);
+        data_destination   : in  std_logic_vector((DATA_WIDTH    - 1) downto 0);
+        data_source_1      : out std_logic_vector((DATA_WIDTH    - 1) downto 0);
+        data_source_2      : out std_logic_vector((DATA_WIDTH    - 1) downto 0)
+    );
 
-    -- Define register file: 32 registers, each 32 bits
-    type reg_file_type is array (0 to 31) of std_logic_vector(31 downto 0);
-    signal registers : reg_file_type := (others => (others => '0'));
+end entity;
+
+architecture RV32I of MODULE_REGISTER_FILE is
+
+    -- No Signals
 
 begin
 
-    -- Write process
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if reset = '1' then
-                registers <= (others => (others => '0'));
-            elsif reg_write = '1' and write_reg /= "00000" then
-                registers(to_integer(unsigned(write_reg))) <= write_data;
-            end if;
-        end if;
-    end process;
+    REGISTER_FILE : entity WORK.RV32I_REGISTER_FILE
+        port map (
+            clock               => clock,
+            clear               => clear,
+            enable              => enable,
+            address_destination => select_destination,
+            address_source_1    => select_source_1,
+            address_source_2    => select_source_2,
+            data_destination    => data_destination,
+            data_source_1       => data_source_1,
+            data_source_2       => data_source_2
+    );
 
-    -- Read ports
-    read_data1 <= registers(to_integer(unsigned(read_reg1)));
-    read_data2 <= registers(to_integer(unsigned(read_reg2)));
-
-end RTL;
+end architecture;

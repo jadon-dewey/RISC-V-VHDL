@@ -19,21 +19,21 @@ entity MODULE_CONTROL_UNIT is
         control_id         : out WORK.CPU.t_CONTROL_ID := WORK.CPU.NULL_CONTROL_ID;
         control_ex         : out WORK.CPU.t_CONTROL_EX := WORK.CPU.NULL_CONTROL_EX;
         control_mem        : out WORK.CPU.t_CONTROL_MEM := WORK.CPU.NULL_CONTROL_MEM;
-        control_wb         : out WORK.CPU.t_CONTROL_WB := WORK.CPU.NULL_CONTROL_WB;
-        enable_multiplier  : out std_logic := '0'  -- New output for multiplier
+        control_wb         : out WORK.CPU.t_CONTROL_WB := WORK.CPU.NULL_CONTROL_WB
+        -- [REMOVED] enable_multiplier : out std_logic := '0'
     );
 
 end entity;
 
 architecture RV32I of MODULE_CONTROL_UNIT is
 
-    alias opcode   is instruction(WORK.RV32I.OPCODE_RANGE);
+    alias opcode is instruction(WORK.RV32I.OPCODE_RANGE);
 
     signal is_lui     : std_logic;
     signal is_auipc   : std_logic;
     signal is_jalr    : std_logic;
     signal is_load    : std_logic;
-    signal is_mul     : std_logic;  -- NEW: Detects MUL/MULH/MULHU/MULHSU
+    signal is_mul     : std_logic;  -- [ADDED] Detects MUL/MULH/MULHU/MULHSU
     signal r_type     : std_logic;
     signal i_type     : std_logic;
     signal s_type     : std_logic;
@@ -47,7 +47,7 @@ begin
     is_auipc <= is_equal_dynamic(opcode, WORK.RV32I.OPCODE_AUIPC);
     is_jalr  <= is_equal_dynamic(opcode, WORK.RV32I.OPCODE_JALR);
     is_load  <= is_equal_dynamic(opcode, WORK.RV32I.OPCODE_LOAD);
-    is_mul   <= is_equal_dynamic(opcode, WORK.RV32I.OPCODE_OP_M);  -- NEW: MUL check
+    is_mul   <= is_equal_dynamic(opcode, WORK.RV32I.OPCODE_OP_M);  -- [ADDED]
 
     r_type   <= is_equal_dynamic(opcode, WORK.RV32I.OPCODE_OP);
     i_type   <= is_equal_dynamic(opcode, WORK.RV32I.OPCODE_OP_IMM) OR is_equal_dynamic(opcode, WORK.RV32I.OPCODE_LOAD) OR is_equal_dynamic(opcode, WORK.RV32I.OPCODE_SYSTEM) OR is_jalr;
@@ -58,12 +58,9 @@ begin
 
     -- Stage Instruction Decode controls
     control_id.enable_branch <= b_type;
-
-    control_id.enable_jalr <= is_jalr;
-
-    control_id.enable_jump <= j_type OR is_jalr;
-
-    control_id.select_jump <= is_jalr;
+    control_id.enable_jalr   <= is_jalr;
+    control_id.enable_jump   <= j_type OR is_jalr;
+    control_id.select_jump   <= is_jalr;
 
     -- Stage Execute controls
     control_ex.select_source_1(0) <= j_type OR is_jalr OR is_auipc;
@@ -73,17 +70,19 @@ begin
     control_ex.select_source_2(1) <= is_jalr;
 
     -- Stage Memory Access controls
-    control_mem.enable_read <= is_load;
-
+    control_mem.enable_read  <= is_load;
     control_mem.enable_write <= s_type;
 
-    -- Write Back controls
-    control_wb.enable_destination <= r_type OR i_type OR u_type OR j_type OR is_mul;  -- Added is_mul
+    -- Stage Write Back controls
+    control_wb.enable_destination <= r_type OR i_type OR u_type OR j_type OR is_mul;
 
-    control_wb.select_destination <= is_load;
+    with opcode select
+    control_wb.select_destination <= 
+        "01" when WORK.RV32I.OPCODE_LOAD,
+        "10" when WORK.RV32I.OPCODE_OP_M,
+        "00" when others;
 
-    -- NEW: enable multiplier
-    enable_multiplier <= is_mul;
+    control_wb.enable_multiplier <= is_mul;  -- [ADDED]
 
     -- Immediate generating
     immediate(31) <= instruction(31);

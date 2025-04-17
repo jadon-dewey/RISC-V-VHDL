@@ -5,86 +5,176 @@ use IEEE.NUMERIC_STD.ALL;
 library WORK;
 
 entity CPU_TOP_LEVEL is
+
     generic (
-        QUARTUS_MEMORY : boolean := FALSE
+         QUARTUS_MEMORY : boolean := FALSE
     );
+
     port (
-        clock           : in  std_logic;
-        clear           : in  std_logic;
-        enable          : in  std_logic;
+        clock           : in  std_logic := '0';
+        clear           : in  std_logic := '0';
+        enable          : in  std_logic := '1';
         memory_read     : out std_logic;
         memory_write    : out std_logic;
-        data_program    : in  std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-        data_memory_in  : in  std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-        data_memory_out : out std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-        address_program : out std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-        address_memory  : out std_logic_vector((WORK.RV32I.XLEN - 1) downto 0)
+        data_program    : in  WORK.RV32I.t_PROGRAM := WORK.RV32I.NULL_INSTRUCTION;
+        data_memory_in  : in  WORK.CPU.t_DATA := (others => '0');
+        data_memory_out : out WORK.CPU.t_DATA;
+        address_program : out WORK.CPU.t_DATA;
+        address_memory  : out WORK.CPU.t_DATA
     );
+
 end entity;
 
 architecture RV32I of CPU_TOP_LEVEL is
 
-    -- Control Signals
-    signal control_wb : WORK.CPU.t_CONTROL_WB;
+    signal control_if                  : WORK.CPU.t_CONTROL_IF := WORK.CPU.NULL_CONTROL_IF;
+    signal signals_if_id               : WORK.CPU.t_SIGNALS_IF_ID;
+    signal signals_id_ex               : WORK.CPU.t_SIGNALS_ID_EX;
+    signal signals_ex_mem              : WORK.CPU.t_SIGNALS_EX_MEM;
+    signal signals_mem_wb              : WORK.CPU.t_SIGNALS_MEM_WB;
+    signal stage_id_address_jump       : WORK.RV32I.t_DATA;
+    signal stage_id_forward_branch     : WORK.CPU.t_FORWARD_BRANCH;
+    signal stage_ex_forward_execution  : WORK.CPU.t_FORWARD_EXECUTION;
+    signal stage_ex_select_source_1    : WORK.RV32I.t_REGISTER;
+    signal stage_ex_select_source_2    : WORK.RV32I.t_REGISTER;
+    signal stage_mem_control_memory    : WORK.CPU.t_CONTROL_MEM;
+    signal stage_wb_enable_destination : std_logic;
+    signal stage_wb_select_destination : WORK.RV32I.t_REGISTER;
+    signal stage_wb_data_destination   : WORK.RV32I.t_DATA;
+    signal flag_stall                  : std_logic;
+    signal flag_hazzard                : std_logic;
 
-    -- Data Signals
-    signal alu_result            : std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-    signal memory_result         : std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-    signal multiplication_result : std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-    signal writeback_result      : std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-
-    -- Operands
-    signal operand_1 : std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-    signal operand_2 : std_logic_vector((WORK.RV32I.XLEN - 1) downto 0);
-
-    -- Multiplication control
-    signal multiplication_enable : std_logic;
+    -- [ADDED] Multiplier propagation signals
+    signal stage_ex_data_multiplication   : WORK.CPU.t_DATA;
+    signal stage_mem_data_multiplication  : WORK.CPU.t_DATA;
+    signal stage_wb_data_multiplication   : WORK.CPU.t_DATA;
+    signal stage_ex_enable_multiplier     : std_logic;
+    signal stage_mem_enable_multiplier    : std_logic;
+    signal stage_wb_enable_multiplier     : std_logic;
 
 begin
 
-    -- Execution Unit
-    EXECUTION_UNIT : entity WORK.MODULE_EXECUTION_UNIT
-        generic map (
-            FUNCTION_WIDTH => 4,
-            DATA_WIDTH     => WORK.RV32I.XLEN
-        )
+    signals_if_id.data_instruction <= data_program;
+
+    address_program <= signals_if_id.address_program;
+
+    memory_read  <= stage_mem_control_memory.enable_read;
+    memory_write <= stage_mem_control_memory.enable_write;
+
+    stage_id_forward_branch.source_mem <= signals_mem_wb.data_destination;
+
+    stage_ex_forward_execution.source_mem <= signals_mem_wb.data_destination;
+    stage_ex_forward_execution.source_wb  <= stage_wb_data_destination;
+
+    INSTRUCTION_FETCH : entity WORK.CPU_STAGE_IF
         port map (
             clock           => clock,
-            enable          => enable,
-            select_source_1 => (others => '0'),
-            select_source_2 => (others => '0'),
-            select_function => (others => '0'),
-            address_program => address_program,
-            source_1        => operand_1,
-            source_2        => operand_2,
-            immediate       => data_program,
-            overflow        => open,
-            destination     => alu_result
+            clear           => clear,
+            enable          => NOT (flag_hazzard OR (flag_stall AND control_if.enable_stall)),
+            source          => control_if,
+            address_jump    => stage_id_address_jump,
+            address_program => signals_if_id.address_program
         );
 
-    -- Multiplier Unit
-    MULTIPLICATION_UNIT : entity WORK.RV32M_MULTIPLIER
-        port map (
-            clock        => clock,
-            enable       => multiplication_enable,
-            select_fun   => "00",  -- MUL
-            input_A      => operand_1,
-            input_B      => operand_2,
-            result_LO    => multiplication_result,
-            result_HI    => open
-        );
-
-    -- Write-Back Unit
-    WRITE_BACK : entity WORK.MODULE_WRITE_BACK
+    INSTRUCTION_DECODE : entity WORK.CPU_STAGE_ID
         generic map (
-            DATA_WIDTH => WORK.RV32I.XLEN
+            QUARTUS_MEMORY => QUARTUS_MEMORY
         )
         port map (
-            selector              => control_wb.select_destination & multiplication_enable,
-            source_execution      => alu_result,
-            source_memory         => memory_result,
-            source_multiplication => multiplication_result,
-            destination           => writeback_result
+            clock                => clock,
+            clear                => NOT flag_stall,
+            enable               => NOT (flag_hazzard OR (flag_stall AND control_if.enable_stall)),
+            enable_destination   => stage_wb_enable_destination,
+            select_destination   => stage_wb_select_destination,
+            data_destination     => stage_wb_data_destination,
+            forward              => stage_id_forward_branch,
+            source               => signals_if_id,
+            address_jump         => stage_id_address_jump,
+            control_if           => control_if,
+            signals_ex           => signals_id_ex
+        );
+
+    EXECUTE : entity WORK.CPU_STAGE_EX
+        port map (
+            clock           => clock,
+            clear           => clear OR (flag_hazzard OR (flag_stall AND control_if.enable_stall)),
+            enable          => enable,
+            forward         => stage_ex_forward_execution,
+            source          => signals_id_ex,
+            select_source_1 => stage_ex_select_source_1,
+            select_source_2 => stage_ex_select_source_2,
+            destination     => signals_ex_mem
+        );
+
+    -- [ADDED] Propagate multiplier output from EX stage
+    stage_ex_data_multiplication <= signals_ex_mem.data_multiplication;
+    stage_ex_enable_multiplier   <= signals_id_ex.enable_multiplier;
+
+    MEMORY_ACCESS : entity WORK.CPU_STAGE_MEM
+        port map (
+            clock           => clock,
+            clear           => clear,
+            enable          => enable,
+            source          => signals_ex_mem,
+            data_memory_in  => data_memory_in,
+            control_memory  => stage_mem_control_memory,
+            address_memory  => address_memory,
+            data_memory_out => data_memory_out,
+            destination     => signals_mem_wb
+        );
+
+    -- [ADDED] Propagate multiplier output from MEM stage
+    stage_mem_data_multiplication <= signals_ex_mem.data_multiplication;
+    stage_mem_enable_multiplier   <= signals_ex_mem.control_wb.enable_multiplier;
+
+    WRITE_BACK : entity WORK.CPU_STAGE_WB
+        port map (
+            clock              => clock,
+            clear              => clear,
+            enable             => enable,
+            enable_destination => stage_wb_enable_destination,
+            select_destination => stage_wb_select_destination,
+            source             => signals_mem_wb,
+            destination        => stage_wb_data_destination
+        );
+
+    -- [ADDED] Propagate multiplier output from WB stage
+    stage_wb_data_multiplication <= signals_mem_wb.data_multiplication;
+    stage_wb_enable_multiplier   <= signals_mem_wb.control_wb.enable_multiplier;
+
+    BRANCH_FORWARDING_UNIT : entity WORK.CPU_BRANCH_FORWARDING_UNIT
+        port map (
+            stage_id_select_source_1     => signals_id_ex.select_source_1,
+            stage_id_select_source_2     => signals_id_ex.select_source_2,
+            stage_mem_enable_destination => signals_mem_wb.control_wb.enable_destination,
+            stage_mem_select_destination => signals_mem_wb.select_destination,
+            select_source_1              => stage_id_forward_branch.select_source_1,
+            select_source_2              => stage_id_forward_branch.select_source_2
+        );
+
+    EXECUTION_FORWARDING_UNIT : entity WORK.CPU_EXECUTION_FORWARDING_UNIT(RV32I)
+        port map (
+            stage_ex_select_source_1     => stage_ex_select_source_1,
+            stage_ex_select_source_2     => stage_ex_select_source_2,
+            stage_mem_enable_destination => signals_mem_wb.control_wb.enable_destination,
+            stage_mem_select_destination => signals_mem_wb.select_destination,
+            stage_wb_enable_destination  => stage_wb_enable_destination,
+            stage_wb_select_destination  => stage_wb_select_destination,
+            select_source_1              => stage_ex_forward_execution.select_source_1,
+            select_source_2              => stage_ex_forward_execution.select_source_2
+        );
+
+    CONTROL_HAZZARD_UNIT : entity WORK.CPU_HAZZARD_CONTROL_UNIT
+        port map (
+            stage_id_select_source_1     => signals_id_ex.select_source_1,
+            stage_id_select_source_2     => signals_id_ex.select_source_2,
+            stage_ex_enable_read         => signals_ex_mem.control_mem.enable_read,
+            stage_ex_enable_destination  => signals_ex_mem.control_wb.enable_destination,
+            stage_ex_select_destination  => signals_ex_mem.select_destination,
+            stage_mem_enable_read        => stage_mem_control_memory.enable_read,
+            stage_mem_select_destination => signals_mem_wb.select_destination,
+            stall_branch                 => flag_stall,
+            destination                  => flag_hazzard
         );
 
 end architecture;

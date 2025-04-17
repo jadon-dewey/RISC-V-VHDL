@@ -12,8 +12,6 @@ entity MODULE_EXECUTION_UNIT is
     );
 
     port (
-        clock           : in  std_logic;
-        enable          : in  std_logic;
         select_source_1  : in  std_logic_vector(1 downto 0);
         select_source_2  : in  std_logic_vector(1 downto 0);
         select_function  : in  std_logic_vector((FUNCTION_WIDTH - 1) downto 0);
@@ -62,8 +60,6 @@ begin
 
     ALU : entity WORK.RV32I_ALU
         port map (
-            clock           => clock,
-            enable          => enable,
             select_function => select_function,
             source_1        => alu_source_1,
             source_2        => alu_source_2,

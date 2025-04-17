@@ -44,17 +44,18 @@ begin
         source_0 <= source;
     end generate;
 
-    WRITE_BACK : entity WORK.MODULE_WRITE_BACK(RV32I)
-    port map (
-        selector             => (0 => source_0.control_wb.select_destination, others => '0'),
-        source_execution     => source_0.data_destination,
-        source_memory        => source_0.data_memory,
-        source_multiplication => source_0.data_multiplication,
-        destination          => destination
-    );
-
+    -- [MODIFIED] Added multiplier support
+    WRITE_BACK : entity WORK.MODULE_WRITE_BACK
+        port map (
+            selector              => source_0.control_wb.select_destination,
+            source_execution      => source_0.data_destination,
+            source_memory         => source_0.data_memory,
+            source_multiplication => source_0.data_multiplication, -- [ADDED]
+            destination           => destination
+        );
 
     enable_destination <= source_0.control_wb.enable_destination;
     select_destination <= source_0.select_destination;
 
 end architecture;
+

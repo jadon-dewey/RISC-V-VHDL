@@ -43,7 +43,7 @@ use ALTERA_MF.ALTERA_MF_COMPONENTS.ALL;
 library WORK;
 
 --! Memória de apenas leitura
-entity GENERIC_ROM is
+entity GENERIC_ROM_QUARTUS is
 
     generic (
         --! Largura dos vetores de dados
@@ -67,7 +67,7 @@ entity GENERIC_ROM is
 
 end entity;
 
-architecture SYN of GENERIC_ROM is
+architecture SYN of GENERIC_ROM_QUARTUS is
 
     -- No signals
 

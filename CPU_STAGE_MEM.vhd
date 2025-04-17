@@ -56,7 +56,9 @@ begin
     destination.data_destination   <= source_0.data_destination;
     destination.select_destination <= source_0.select_destination;
 
-    MEM_INTERFACE: entity WORK.MODULE_MEMORY_INTERFACE(RV32I)
+    destination.data_multiplication <= source_0.data_multiplication;
+
+    MEM_INTERFACE: entity WORK.MODULE_MEMORY_INTERFACE
         generic map (
             FUNCTION_WIDTH => WORK.RV32I.FUNCT3_WIDTH,
             DATA_WIDTH     => WORK.RV32I.XLEN
