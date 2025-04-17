@@ -177,7 +177,7 @@ begin
     ------------------------------------------------------------------------------
     -- Interrupt Edge + Acknowledge Logic
     ------------------------------------------------------------------------------
-    -- We'll use two processes: one to remember the old interrupt_req
+    -- Two processes: one to remember the old interrupt_req
     -- and another to handle the "interrupt pending" latch & single-cycle acknowledge.
     ------------------------------------------------------------------------------
     
